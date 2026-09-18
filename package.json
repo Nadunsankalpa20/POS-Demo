@@ -1,0 +1,18 @@
+{
+  "name": "supermarket-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modern 3D Supermarket POS + Back Office Management System",
+  "scripts": {
+    "install:all": "npm install && cd Backend && npm install && cd ../POS && npm install && cd ../BackOffice && npm install",
+    "seed": "cd Backend && npm run seed",
+    "dev:backend": "cd Backend && npm run dev",
+    "dev:pos": "cd POS && npm run dev",
+    "dev:backoffice": "cd BackOffice && npm run dev",
+    "test:backend": "cd Backend && npm test",
+    "build": "cd Backend && npm run build && cd ../POS && npm run build && cd ../BackOffice && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
