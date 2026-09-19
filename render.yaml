@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: supermarket-backend
+    runtime: node
+    rootDir: Backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLIENT_POS_URL
+        value: "*"
+      - key: CLIENT_BACKOFFICE_URL
+        value: "*"

@@ -1,11 +1,32 @@
+# Dependencies
 node_modules/
+**/node_modules/
+
+# Production builds
 dist/
+**/dist/
 build/
+**/build/
+
+# Environment files (NEVER commit secrets to GitHub)
 .env
+.env.*
+.env.local
+.env.production
+.env.development
+!.env.example
+!.env.*.example
+
+# Vercel & Editor
+.vercel
+.vscode/
+.idea/
+
+# OS and Logs
 .DS_Store
+Thumbs.db
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.vscode/
-.idea/
+pnpm-debug.log*

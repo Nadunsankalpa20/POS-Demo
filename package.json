@@ -4,6 +4,7 @@
   "private": true,
   "description": "Modern 3D Supermarket POS + Back Office Management System",
   "scripts": {
+    "dev": "concurrently -n \"BACKEND,POS,BACKOFFICE\" -c \"blue,green,magenta\" \"npm run dev:backend\" \"npm run dev:pos\" \"npm run dev:backoffice\"",
     "install:all": "npm install && cd Backend && npm install && cd ../POS && npm install && cd ../BackOffice && npm install",
     "seed": "cd Backend && npm run seed",
     "dev:backend": "cd Backend && npm run dev",
