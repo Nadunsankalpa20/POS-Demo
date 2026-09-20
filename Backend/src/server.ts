@@ -37,6 +37,21 @@ const startServer = async () => {
       console.log(`   Cashier:    cashier / cashier123`);
       console.log(`====================================================`);
     });
+
+    // 5. Keep-Alive Heartbeat for 24/7 Cloud Hosting (Prevents free tier servers from sleeping)
+    const keepAliveUrl = process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL;
+    if (keepAliveUrl) {
+      const pingUrl = `${keepAliveUrl.replace(/\/$/, '')}/health`;
+      console.log(`[Keep-Alive] 24/7 cloud heartbeat enabled. Pinging ${pingUrl} every 10 minutes.`);
+      setInterval(async () => {
+        try {
+          const res = await fetch(pingUrl);
+          console.log(`[Keep-Alive] Heartbeat ping sent to ${pingUrl} -> HTTP ${res.status}`);
+        } catch (pingErr: any) {
+          console.warn(`[Keep-Alive] Heartbeat ping failed:`, pingErr.message);
+        }
+      }, 10 * 60 * 1000);
+    }
   } catch (err) {
     console.error('[Startup Error] Failed to start server:', err);
     process.exit(1);
