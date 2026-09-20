@@ -1,88 +1,59 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+/**
+ * api.ts — Firebase Firestore adapter
+ *
+ * This file keeps the same interface as the original REST api.ts so no
+ * page or component code needs to change. All calls are now routed to
+ * Firebase Firestore instead of the Node.js backend.
+ */
+import { firebaseAuth, productsApi, categoriesApi, salesApi } from './firestoreApi';
 
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('pos_token');
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-};
+/** Normalize a Firestore doc (id field) to match the old MongoDB _id shape */
+function normalizeProduct(p: any) {
+  return { ...p, _id: p.id };
+}
 
 export const api = {
+  // ── Auth ─────────────────────────────────────────────────────────────────
+
   async login(username: string, password: string) {
-    const res = await fetch(`${API_URL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Login failed');
-    return data;
+    return firebaseAuth.login(username, password);
   },
 
-  async getProducts(params?: { search?: string; categoryId?: string; status?: string }) {
-    const searchParams = new URLSearchParams();
-    if (params?.search) searchParams.append('search', params.search);
-    if (params?.categoryId && params.categoryId !== 'ALL') searchParams.append('categoryId', params.categoryId);
-    searchParams.append('status', 'Active');
-    searchParams.append('limit', '150');
+  // ── Products ─────────────────────────────────────────────────────────────
 
-    const res = await fetch(`${API_URL}/products?${searchParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch products');
-    return data;
+  async getProducts(params?: { search?: string; categoryId?: string; status?: string }) {
+    const result = await productsApi.getAll(params);
+    return {
+      ...result,
+      products: result.products.map(normalizeProduct),
+    };
   },
 
   async getProductByBarcode(barcode: string) {
-    const res = await fetch(`${API_URL}/products/barcode/${encodeURIComponent(barcode)}`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Product not found');
-    return data.product;
+    const product = await productsApi.getByBarcode(barcode);
+    return normalizeProduct(product);
   },
 
-  async getCategories() {
-    const res = await fetch(`${API_URL}/categories`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch categories');
-    return data.categories;
+  // ── Categories ───────────────────────────────────────────────────────────
+
+  async getCategories(): Promise<any[]> {
+    return categoriesApi.getAll();
   },
 
-  async checkout(salePayload: any) {
-    const res = await fetch(`${API_URL}/sales`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(salePayload),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Checkout failed');
-    return data.sale;
+  // ── Sales ─────────────────────────────────────────────────────────────────
+
+  async checkout(salePayload: any): Promise<any> {
+    return salesApi.checkout(salePayload);
   },
 
   async getSalesHistory(params?: { cashierId?: string; page?: number; limit?: number }) {
-    const searchParams = new URLSearchParams();
-    if (params?.cashierId) searchParams.append('cashierId', params.cashierId);
-    searchParams.append('limit', String(params?.limit || 25));
-
-    const res = await fetch(`${API_URL}/sales?${searchParams.toString()}`, {
-      headers: getAuthHeaders(),
+    return salesApi.getHistory({
+      cashierId: params?.cashierId,
+      limitCount: params?.limit,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch sales history');
-    return data;
   },
 
   async getSaleByInvoice(invoiceNumber: string) {
-    const res = await fetch(`${API_URL}/sales/invoice/${encodeURIComponent(invoiceNumber)}`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Invoice not found');
-    return data.sale;
+    return salesApi.getByInvoice(invoiceNumber);
   },
 };

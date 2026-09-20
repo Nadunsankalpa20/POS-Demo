@@ -1,258 +1,177 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+/**
+ * api.ts — Firebase Firestore adapter for BackOffice
+ *
+ * Keeps the exact same interface as the original REST api.ts so that
+ * all BackOffice pages/components work without any changes.
+ */
+import {
+  firebaseAuth,
+  dashboardApi,
+  productsApi,
+  stockApi,
+  salesApi,
+  reportsApi,
+  categoriesApi,
+  suppliersApi,
+  usersApi,
+  auditApi,
+} from './firestoreApi';
 
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('bo_token');
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-};
+function normalize(doc: any) {
+  return { ...doc, _id: doc.id };
+}
 
 export const api = {
-  // Auth
+  // ── Auth ──────────────────────────────────────────────────────────────────
   async login(username: string, password: string) {
-    const res = await fetch(`${API_URL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Login failed');
-    return data;
+    return firebaseAuth.login(username, password);
   },
 
-  // Dashboard
+  // ── Dashboard ─────────────────────────────────────────────────────────────
   async getDashboard() {
-    const res = await fetch(`${API_URL}/reports/dashboard`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch dashboard metrics');
-    return data.data;
+    return dashboardApi.getMetrics();
   },
 
-  // Products
+  // ── Products ──────────────────────────────────────────────────────────────
   async getProducts(params?: { search?: string; categoryId?: string; status?: string; lowStock?: boolean; page?: number; limit?: number }) {
-    const sp = new URLSearchParams();
-    if (params?.search) sp.append('search', params.search);
-    if (params?.categoryId && params.categoryId !== 'ALL') sp.append('categoryId', params.categoryId);
-    if (params?.status) sp.append('status', params.status);
-    if (params?.lowStock) sp.append('lowStock', 'true');
-    if (params?.page) sp.append('page', String(params.page));
-    if (params?.limit) sp.append('limit', String(params.limit));
-
-    const res = await fetch(`${API_URL}/products?${sp.toString()}`, {
-      headers: getAuthHeaders(),
+    const result = await productsApi.getAll({
+      ...params,
+      limitCount: params?.limit,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch products');
-    return data;
+    return {
+      ...result,
+      products: result.products.map(normalize),
+    };
   },
 
-  async createProduct(productData: any) {
-    const res = await fetch(`${API_URL}/products`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(productData),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to create product');
-    return data.product;
+  async createProduct(data: any) {
+    const result = await productsApi.create(data);
+    return normalize(result);
   },
 
-  async updateProduct(id: string, productData: any) {
-    const res = await fetch(`${API_URL}/products/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(productData),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to update product');
-    return data.product;
+  async updateProduct(id: string, data: any) {
+    const result = await productsApi.update(id, data);
+    return normalize(result);
   },
 
   async deleteProduct(id: string) {
-    const res = await fetch(`${API_URL}/products/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to deactivate product');
-    return data;
+    await productsApi.softDelete(id);
+    return { success: true };
   },
 
-  // Stock Operations
+  // ── Stock ─────────────────────────────────────────────────────────────────
   async stockIn(payload: any) {
-    const res = await fetch(`${API_URL}/stock/in`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Stock In failed');
-    return data;
+    await stockApi.stockIn(payload);
+    return { success: true };
   },
 
   async stockOut(payload: any) {
-    const res = await fetch(`${API_URL}/stock/out`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Stock Out failed');
-    return data;
+    await stockApi.stockOut(payload);
+    return { success: true };
   },
 
   async voidSale(saleId: string, reason: string) {
-    const res = await fetch(`${API_URL}/stock/void/${saleId}`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ reason }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Void sale failed');
-    return data;
+    // userId and userName should come from the caller's auth context
+    // Using a placeholder here — components should pass their own user info
+    await stockApi.voidSale(saleId, reason, 'system', 'BackOffice User');
+    return { success: true };
   },
 
-  async getMovements(params?: { productId?: string; type?: string; page?: number; limit?: number }) {
-    const sp = new URLSearchParams();
-    if (params?.productId) sp.append('productId', params.productId);
-    if (params?.type && params.type !== 'ALL') sp.append('type', params.type);
-    if (params?.page) sp.append('page', String(params.page));
-    if (params?.limit) sp.append('limit', String(params.limit || 50));
-
-    const res = await fetch(`${API_URL}/stock/movements?${sp.toString()}`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch movements');
-    return data;
+  async getMovements(params?: { productId?: string; type?: string; page?: number; limit?: number }): Promise<any> {
+    const data = await stockApi.getMovements({ ...params, limitCount: params?.limit });
+    const movements = (data.movements || []).map((m: any) => ({
+      _id: m.id,
+      type: m.type === 'STOCK_IN' ? 'IN' : m.type === 'STOCK_OUT' ? 'OUT' : m.type,
+      productId: {
+        _id: m.productId || '',
+        name: m.productName || 'Unknown Product',
+        barcode: m.sku || '',
+      },
+      quantity: Math.abs(m.quantity || 0),
+      reference: m.referenceId || m.reference || '',
+      notes: m.notes || '',
+      performedBy: {
+        fullName: m.userName || '',
+        username: m.userId || '',
+      },
+      createdAt: m.createdAt?.toDate ? m.createdAt.toDate().toISOString() : (m.createdAt || new Date().toISOString()),
+      ...m,
+    }));
+    return {
+      movements,
+      totalPages: 1,
+      total: movements.length,
+    };
   },
 
-  // Sales
+  // ── Sales ─────────────────────────────────────────────────────────────────
   async getSales(params?: { page?: number; limit?: number; status?: string; invoiceNumber?: string; startDate?: string; endDate?: string }) {
-    const sp = new URLSearchParams();
-    if (params?.page) sp.append('page', String(params.page));
-    if (params?.limit) sp.append('limit', String(params.limit || 20));
-    if (params?.status) sp.append('status', params.status);
-    if (params?.invoiceNumber) sp.append('invoiceNumber', params.invoiceNumber);
-    if (params?.startDate) sp.append('startDate', params.startDate);
-    if (params?.endDate) sp.append('endDate', params.endDate);
-
-    const res = await fetch(`${API_URL}/sales?${sp.toString()}`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch sales');
-    return data;
+    return salesApi.getAll({ ...params, limitCount: params?.limit });
   },
 
-  // Reports
+  // ── Reports ───────────────────────────────────────────────────────────────
   async getSalesReport(filter?: { startDate?: string; endDate?: string; cashierId?: string; paymentMethod?: string }) {
-    const sp = new URLSearchParams();
-    if (filter?.startDate) sp.append('startDate', filter.startDate);
-    if (filter?.endDate) sp.append('endDate', filter.endDate);
-    if (filter?.paymentMethod) sp.append('paymentMethod', filter.paymentMethod);
-
-    const res = await fetch(`${API_URL}/reports/sales?${sp.toString()}`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch sales report');
-    return data;
+    return reportsApi.getSalesReport(filter);
   },
 
   async getProductPerformance(filter?: { startDate?: string; endDate?: string }) {
-    const sp = new URLSearchParams();
-    if (filter?.startDate) sp.append('startDate', filter.startDate);
-    if (filter?.endDate) sp.append('endDate', filter.endDate);
-
-    const res = await fetch(`${API_URL}/reports/products?${sp.toString()}`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch product performance');
-    return data.products;
+    return reportsApi.getProductPerformance(filter);
   },
 
   async getStockReport() {
-    const res = await fetch(`${API_URL}/reports/stock`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to fetch stock report');
-    return data.products;
+    return reportsApi.getStockReport();
   },
 
-  // Categories & Suppliers
-  async getCategories() {
-    const res = await fetch(`${API_URL}/categories`, { headers: getAuthHeaders() });
-    const data = await res.json();
-    return data.categories || [];
+  // ── Categories ────────────────────────────────────────────────────────────
+  async getCategories(): Promise<any[]> {
+    const cats = await categoriesApi.getAll();
+    return cats.map(normalize);
   },
 
   async createCategory(payload: any) {
-    const res = await fetch(`${API_URL}/categories`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-    return res.json();
+    return categoriesApi.create(payload);
   },
 
-  async getSuppliers() {
-    const res = await fetch(`${API_URL}/suppliers`, { headers: getAuthHeaders() });
-    const data = await res.json();
-    return data.suppliers || [];
+  // ── Suppliers ─────────────────────────────────────────────────────────────
+  async getSuppliers(): Promise<any[]> {
+    const sups = await suppliersApi.getAll();
+    return sups.map(normalize);
   },
 
   async createSupplier(payload: any) {
-    const res = await fetch(`${API_URL}/suppliers`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-    return res.json();
+    return suppliersApi.create(payload);
   },
 
-  // Users & Audit
+  // ── Users ─────────────────────────────────────────────────────────────────
   async getUsers() {
-    const res = await fetch(`${API_URL}/auth/users`, { headers: getAuthHeaders() });
-    const data = await res.json();
-    return data.users || [];
+    const users = await usersApi.getAll();
+    return users.map(normalize);
   },
 
   async createUser(payload: any) {
-    const res = await fetch(`${API_URL}/auth/users`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to create user');
-    return data.user;
+    const user = await usersApi.create(payload);
+    return normalize(user);
   },
 
   async updateUser(id: string, payload: any) {
-    const res = await fetch(`${API_URL}/auth/users/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Failed to update user');
-    return data.user;
+    const user = await usersApi.update(id, payload);
+    return normalize(user);
   },
 
-  async getAuditLogs(params?: { module?: string; action?: string; limit?: number }) {
-    const sp = new URLSearchParams();
-    if (params?.module) sp.append('module', params.module);
-    if (params?.action) sp.append('action', params.action);
-    if (params?.limit) sp.append('limit', String(params.limit || 100));
-
-    const res = await fetch(`${API_URL}/audit?${sp.toString()}`, { headers: getAuthHeaders() });
-    const data = await res.json();
-    return data.logs || [];
+  // ── Audit Logs ────────────────────────────────────────────────────────────
+  async getAuditLogs(params?: { module?: string; action?: string; limit?: number }): Promise<any[]> {
+    const logs = await auditApi.getAll({ ...params, limitCount: params?.limit });
+    return logs.map((log: any) => ({
+      _id: log.id,
+      action: log.action || '',
+      module: log.module || '',
+      details: log.description || log.details || '',
+      performedBy: {
+        fullName: log.userName || '',
+        username: log.userId || '',
+      },
+      createdAt: log.createdAt?.toDate ? log.createdAt.toDate().toISOString() : (log.createdAt || new Date().toISOString()),
+      ...log,
+    }));
   },
 };

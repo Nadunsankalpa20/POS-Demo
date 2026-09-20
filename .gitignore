@@ -8,7 +8,7 @@ dist/
 build/
 **/build/
 
-# Environment files (NEVER commit secrets to GitHub)
+# Environment files and credentials (NEVER commit secrets to GitHub)
 .env
 .env.*
 .env.local
@@ -16,6 +16,8 @@ build/
 .env.development
 !.env.example
 !.env.*.example
+serviceAccountKey.json
+*serviceAccount*.json
 
 # Vercel & Editor
 .vercel

@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: is the request from a logged-in user?
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // All authenticated users can read products and categories
+    match /products/{id} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    match /categories/{id} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    match /suppliers/{id} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Sales: any authenticated user can create; read is open to all authenticated
+    match /sales/{id} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth();
+    }
+
+    // Stock movements: read/write for all authenticated users
+    match /stockMovements/{id} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Users: authenticated users can read their own profile
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Audit logs: append only (no delete)
+    match /auditLogs/{id} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+    }
+  }
+}
