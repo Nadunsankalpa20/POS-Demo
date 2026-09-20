@@ -317,12 +317,30 @@ export const stockApi = {
 
   async voidSale(saleId: string, reason: string, userId: string, userName: string) {
     await runTransaction(db, async (transaction) => {
+      // ── PHASE 1: READS FIRST ────────────────────────────────
       const saleRef = doc(db, 'sales', saleId);
       const saleSnap = await transaction.get(saleRef);
       if (!saleSnap.exists()) throw new Error('Sale not found');
       const sale = saleSnap.data();
       if (sale.status === 'VOIDED') throw new Error('Sale is already voided');
 
+      // Read all products before making any writes
+      const productRestorations: { ref: any; newStock: number; prev: number; item: any }[] = [];
+      for (const item of sale.items || []) {
+        const productRef = doc(db, 'products', item.productId);
+        const productSnap = await transaction.get(productRef);
+        if (productSnap.exists()) {
+          const prev = (productSnap.data()?.stockQuantity as number) ?? 0;
+          productRestorations.push({
+            ref: productRef,
+            newStock: prev + item.quantity,
+            prev,
+            item,
+          });
+        }
+      }
+
+      // ── PHASE 2: WRITES SECOND ──────────────────────────────
       transaction.update(saleRef, {
         status: 'VOIDED',
         voidReason: reason,
@@ -331,43 +349,51 @@ export const stockApi = {
         updatedAt: serverTimestamp(),
       });
 
-      // Restore stock for each item
-      for (const item of sale.items) {
-        const productRef = doc(db, 'products', item.productId);
-        const productSnap = await transaction.get(productRef);
-        if (productSnap.exists()) {
-          const prev = productSnap.data().stockQuantity as number;
-          const newStock = prev + item.quantity;
-          transaction.update(productRef, { stockQuantity: newStock, updatedAt: serverTimestamp() });
+      for (const { ref, newStock, prev, item } of productRestorations) {
+        transaction.update(ref, { stockQuantity: newStock, updatedAt: serverTimestamp() });
 
-          const movRef = doc(collection(db, 'stockMovements'));
-          transaction.set(movRef, {
-            productId: item.productId,
-            productName: item.productName,
-            sku: item.sku,
-            type: 'VOID',
-            quantity: item.quantity,
-            previousStock: prev,
-            newStock,
-            referenceId: sale.invoiceNumber,
-            notes: `Void: ${reason}`,
-            userId,
-            userName,
-            createdAt: serverTimestamp(),
-          });
-        }
+        const movRef = doc(collection(db, 'stockMovements'));
+        transaction.set(movRef, {
+          productId: item.productId,
+          productName: item.productName,
+          sku: item.sku,
+          type: 'VOID',
+          quantity: item.quantity,
+          previousStock: prev,
+          newStock,
+          referenceId: sale.invoiceNumber,
+          notes: `Void: ${reason}`,
+          userId,
+          userName,
+          createdAt: serverTimestamp(),
+        });
       }
     });
   },
 
   async getMovements(params?: { productId?: string; type?: string; limitCount?: number }) {
-    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc'), limit(params?.limitCount || 50)];
-    if (params?.productId) constraints.unshift(where('productId', '==', params.productId));
-    if (params?.type && params.type !== 'ALL') constraints.unshift(where('type', '==', params.type));
+    try {
+      const q = query(collection(db, 'stockMovements'), limit(150));
+      const snap = await getDocs(q);
+      let movements = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
-    const q = query(collection(db, 'stockMovements'), ...constraints);
-    const snap = await getDocs(q);
-    return { movements: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+      if (params?.productId) {
+        movements = movements.filter((m) => m.productId === params.productId);
+      }
+      if (params?.type && params.type !== 'ALL') {
+        movements = movements.filter((m) => m.type === params.type);
+      }
+
+      movements.sort((a, b) => {
+        const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+        const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+        return tB - tA;
+      });
+
+      return { movements: movements.slice(0, params?.limitCount || 50) };
+    } catch {
+      return { movements: [] };
+    }
   },
 };
 

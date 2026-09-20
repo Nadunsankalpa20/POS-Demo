@@ -174,30 +174,45 @@ export const categoriesApi = {
 
 export const salesApi = {
   async checkout(salePayload: any): Promise<any> {
-    // Run as a transaction to atomically decrement stock + create sale
     const invoiceNumber =
       salePayload.invoiceNumber ||
       `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    const saleRef = await runTransaction(db, async (transaction) => {
-      // 1. Decrement stock for each item
+    const { newSaleRef, productUpdates } = await runTransaction(db, async (transaction) => {
+      // ── PHASE 1: READ ALL PRODUCTS FIRST (No writes allowed yet) ──
+      const updates: { ref: any; currentStock: number; newStock: number; item: any }[] = [];
+
       for (const item of salePayload.items) {
         const productRef = doc(db, 'products', item.productId);
         const productSnap = await transaction.get(productRef);
-        if (!productSnap.exists()) throw new Error(`Product ${item.productName} not found`);
-        const currentStock = productSnap.data().stockQuantity as number;
-        if (currentStock < item.quantity) {
-          throw new Error(`Insufficient stock for ${item.productName}. Available: ${currentStock}`);
+        if (!productSnap.exists()) {
+          throw new Error(`Product "${item.productName || item.sku}" not found in inventory.`);
         }
-        transaction.update(productRef, {
-          stockQuantity: currentStock - item.quantity,
+        const currentStock = (productSnap.data()?.stockQuantity as number) ?? 0;
+        if (currentStock < item.quantity) {
+          throw new Error(
+            `Insufficient stock for "${item.productName}". Available: ${currentStock}, Requested: ${item.quantity}`
+          );
+        }
+        updates.push({
+          ref: productRef,
+          currentStock,
+          newStock: currentStock - item.quantity,
+          item,
+        });
+      }
+
+      // ── PHASE 2: WRITE ALL UPDATES (All reads completed) ─────────
+      for (const { ref, newStock } of updates) {
+        transaction.update(ref, {
+          stockQuantity: newStock,
           updatedAt: serverTimestamp(),
         });
       }
 
-      // 2. Create the sale document
-      const newSaleRef = doc(collection(db, 'sales'));
-      transaction.set(newSaleRef, {
+      // Create the sale document
+      const createdSaleRef = doc(collection(db, 'sales'));
+      transaction.set(createdSaleRef, {
         ...salePayload,
         invoiceNumber,
         status: 'COMPLETED',
@@ -205,46 +220,63 @@ export const salesApi = {
         updatedAt: serverTimestamp(),
       });
 
-      return newSaleRef;
+      return { newSaleRef: createdSaleRef, productUpdates: updates };
     });
 
-    // 3. Create stock movement records (outside transaction for simplicity)
-    for (const item of salePayload.items) {
-      const productRef = doc(db, 'products', item.productId);
-      const productSnap = await getDoc(productRef);
-      const currentStock = productSnap.data()?.stockQuantity ?? 0;
-      await addDoc(collection(db, 'stockMovements'), {
-        productId: item.productId,
-        productName: item.productName,
-        sku: item.sku,
-        type: 'SALE',
-        quantity: -item.quantity,
-        previousStock: currentStock + item.quantity,
-        newStock: currentStock,
-        referenceId: invoiceNumber,
-        notes: `POS Sale: ${invoiceNumber}`,
-        userId: salePayload.cashierId,
-        userName: salePayload.cashierName,
-        createdAt: serverTimestamp(),
-      });
+    // ── PHASE 3: Create stock movement records ──────────────────────
+    for (const { currentStock, newStock, item } of productUpdates) {
+      try {
+        await addDoc(collection(db, 'stockMovements'), {
+          productId: item.productId,
+          productName: item.productName,
+          sku: item.sku,
+          type: 'SALE',
+          quantity: -item.quantity,
+          previousStock: currentStock,
+          newStock,
+          referenceId: invoiceNumber,
+          notes: `POS Sale: ${invoiceNumber}`,
+          userId: salePayload.cashierId || 'cashier',
+          userName: salePayload.cashierName || 'Cashier',
+          createdAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Failed to record stock movement:', err);
+      }
     }
 
-    // Return full sale data that components expect (total, invoiceNumber etc.)
-    const saleSnap = await getDoc(saleRef);
-    return { id: saleRef.id, ...saleSnap.data(), invoiceNumber };
+    return {
+      id: newSaleRef.id,
+      _id: newSaleRef.id,
+      ...salePayload,
+      invoiceNumber,
+      status: 'COMPLETED',
+      createdAt: new Date().toISOString(),
+    };
   },
 
   async getHistory(params?: { cashierId?: string; limitCount?: number }) {
-    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
-    if (params?.cashierId) {
-      constraints.push(where('cashierId', '==', params.cashierId));
-    }
-    constraints.push(limit(params?.limitCount || 25));
+    try {
+      const q = query(collection(db, 'sales'), limit(100));
+      const snap = await getDocs(q);
+      let sales = snap.docs.map((d) => ({ id: d.id, _id: d.id, ...d.data() })) as any[];
 
-    const q = query(collection(db, 'sales'), ...constraints);
-    const snap = await getDocs(q);
-    const sales = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    return { sales, total: sales.length };
+      if (params?.cashierId) {
+        sales = sales.filter((s) => s.cashierId === params.cashierId);
+      }
+
+      // In-memory sort by createdAt desc
+      sales.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
+
+      const limited = sales.slice(0, params?.limitCount || 25);
+      return { sales: limited, total: sales.length };
+    } catch {
+      return { sales: [], total: 0 };
+    }
   },
 
   async getByInvoice(invoiceNumber: string) {
@@ -256,6 +288,6 @@ export const salesApi = {
     const snap = await getDocs(q);
     if (snap.empty) throw new Error('Invoice not found');
     const d = snap.docs[0];
-    return { id: d.id, ...d.data() };
+    return { id: d.id, _id: d.id, ...d.data() };
   },
 };
