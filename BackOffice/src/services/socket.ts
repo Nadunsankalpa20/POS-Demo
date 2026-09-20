@@ -1,17 +1,26 @@
 import { io, Socket } from 'socket.io-client';
 import { useLiveStore } from '../store/liveStore';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:5000' : '');
 
 let socket: Socket | null = null;
 
 export const getBackOfficeSocket = (): Socket => {
   if (!socket) {
-    socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
-      autoConnect: true,
-      reconnectionAttempts: 10,
-    });
+    if (SOCKET_URL) {
+      socket = io(SOCKET_URL, {
+        transports: ['websocket', 'polling'],
+        autoConnect: true,
+        reconnectionAttempts: 5,
+      });
+    } else {
+      socket = {
+        on: () => socket,
+        off: () => socket,
+        emit: () => socket,
+      } as unknown as Socket;
+      return socket;
+    }
 
     socket.on('connect', () => {
       console.log('[BackOffice Socket] Connected to backend:', socket?.id);
