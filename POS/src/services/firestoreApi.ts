@@ -29,7 +29,7 @@ export const firebaseAuth = {
    * Password is managed by Firebase Auth.
    */
   async login(username: string, password: string) {
-    // 1. Find user document by username
+    // 1. Find user document by username in Firestore
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('username', '==', username.toLowerCase()));
     const snap = await getDocs(q);
@@ -39,14 +39,28 @@ export const firebaseAuth = {
     const userData = userDoc.data();
     if (!userData.active) throw new Error('Account is inactive. Contact admin.');
 
-    // 2. Sign in with Firebase Auth or fallback to verified profile
-    let token = `firestore-token-${userDoc.id}`;
+    // 2. Verify password — try Firebase Auth first, then stored password fallback
+    let token = `pos-session-${userDoc.id}-${Date.now()}`;
+    let authSuccess = false;
+
     try {
       const email = userData.email as string;
       const credential = await signInWithEmailAndPassword(auth, email, password);
       token = await credential.user.getIdToken();
-    } catch {
-      if (userData.password && userData.password !== password) {
+      authSuccess = true;
+    } catch (authErr: any) {
+      // Firebase Auth failed — check if it's wrong password or just Auth not configured
+      const code = authErr?.code || '';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') {
+        throw new Error('Invalid username or password');
+      }
+      // For other errors (auth/configuration-not-found, network, etc.) fall through to stored password check
+    }
+
+    // If Firebase Auth didn't succeed, verify against stored password
+    if (!authSuccess) {
+      const storedPassword = userData.password as string | undefined;
+      if (!storedPassword || storedPassword !== password) {
         throw new Error('Invalid username or password');
       }
     }

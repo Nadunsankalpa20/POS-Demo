@@ -43,13 +43,25 @@ export const firebaseAuth = {
     const userData = userDoc.data();
     if (!userData.active) throw new Error('Account is inactive. Contact admin.');
 
-    // Sign in with Firebase Auth or fallback to verified profile
-    let token = `firestore-token-${userDoc.id}`;
+    // Try Firebase Auth first, then fall back to stored password
+    let token = `pos-session-${userDoc.id}-${Date.now()}`;
+    let authSuccess = false;
+
     try {
       const credential = await signInWithEmailAndPassword(auth, userData.email, password);
       token = await credential.user.getIdToken();
-    } catch {
-      if (userData.password && userData.password !== password) {
+      authSuccess = true;
+    } catch (authErr: any) {
+      const code = authErr?.code || '';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') {
+        throw new Error('Invalid username or password');
+      }
+      // For auth/configuration-not-found or other infra errors, fall through
+    }
+
+    if (!authSuccess) {
+      const storedPassword = userData.password as string | undefined;
+      if (!storedPassword || storedPassword !== password) {
         throw new Error('Invalid username or password');
       }
     }
