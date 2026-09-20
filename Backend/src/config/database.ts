@@ -3,8 +3,17 @@ import mongoose from 'mongoose';
 let mongoMemoryServerInstance: any = null;
 
 export const connectDatabase = async (): Promise<void> => {
-  const targetUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/supermarket_pos';
-  const isCloudOrAtlas = targetUri.includes('mongodb+srv://') || Boolean(process.env.MONGODB_URI) || process.env.NODE_ENV === 'production';
+  const targetUri =
+    process.env.MONGODB_URI ||
+    process.env.MONGO_URL ||
+    process.env.MONGO_PRIVATE_URL ||
+    process.env.DATABASE_URL ||
+    'mongodb://127.0.0.1:27017/supermarket_pos';
+  const isCloudOrAtlas =
+    targetUri.includes('mongodb+srv://') ||
+    targetUri.includes('railway') ||
+    Boolean(process.env.MONGODB_URI || process.env.MONGO_URL) ||
+    process.env.NODE_ENV === 'production';
 
   try {
     // Cloud connections (Atlas) need longer timeout for initial TLS handshake
