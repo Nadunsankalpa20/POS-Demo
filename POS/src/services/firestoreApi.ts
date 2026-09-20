@@ -86,29 +86,38 @@ export const firebaseAuth = {
 
 export const productsApi = {
   async getAll(params?: { search?: string; categoryId?: string; status?: string }) {
-    const constraints: QueryConstraint[] = [];
-
-    if (params?.status && params.status !== 'ALL') {
-      constraints.push(where('status', '==', params.status));
-    } else {
-      constraints.push(where('status', '==', 'Active'));
+    let snap;
+    try {
+      if (params?.status && params.status !== 'ALL') {
+        const q = query(collection(db, 'products'), where('status', '==', params.status));
+        snap = await getDocs(q);
+      } else {
+        const q = query(collection(db, 'products'));
+        snap = await getDocs(q);
+      }
+    } catch {
+      snap = await getDocs(collection(db, 'products'));
     }
-
-    if (params?.categoryId && params.categoryId !== 'ALL') {
-      constraints.push(where('categoryId', '==', params.categoryId));
-    }
-
-    constraints.push(orderBy('name'));
-    constraints.push(limit(150));
-
-    const q = query(collection(db, 'products'), ...constraints);
-    const snap = await getDocs(q);
 
     let products = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
+    // Status filter
+    if (params?.status && params.status !== 'ALL') {
+      products = products.filter((p) => p.status === params.status);
+    } else if (!params?.status) {
+      products = products.filter((p) => p.status === 'Active' || !p.status);
+    }
+
+    // Category filter
+    if (params?.categoryId && params.categoryId !== 'ALL') {
+      products = products.filter(
+        (p) => p.categoryId === params.categoryId || p.categoryName === params.categoryId
+      );
+    }
+
     // Client-side search filter (Firestore doesn't support full-text search)
     if (params?.search) {
-      const term = params.search.toLowerCase();
+      const term = params.search.toLowerCase().trim();
       products = products.filter(
         (p) =>
           p.name?.toLowerCase().includes(term) ||
@@ -117,6 +126,9 @@ export const productsApi = {
           p.productCode?.toLowerCase().includes(term)
       );
     }
+
+    // Client-side sort by name (no composite index required)
+    products.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     return { products, total: products.length };
   },
@@ -131,13 +143,12 @@ export const productsApi = {
 
   /** Subscribe to real-time product changes (for live stock updates in POS) */
   subscribeToProducts(callback: (products: any[]) => void) {
-    const q = query(
-      collection(db, 'products'),
-      where('status', '==', 'Active'),
-      orderBy('name')
-    );
+    const q = query(collection(db, 'products'));
     return onSnapshot(q, (snap) => {
-      const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const products = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((p: any) => p.status === 'Active' || !p.status)
+        .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
       callback(products);
     });
   },
@@ -147,10 +158,15 @@ export const productsApi = {
 
 export const categoriesApi = {
   async getAll(): Promise<any[]> {
-    const q = query(collection(db, 'categories'), where('active', '==', true), orderBy('name'));
-    const snap = await getDocs(q);
-    // Add _id alias so components that reference _id still work
-    return snap.docs.map((d) => ({ id: d.id, _id: d.id, ...d.data() }));
+    try {
+      const snap = await getDocs(collection(db, 'categories'));
+      const cats = snap.docs.map((d) => ({ id: d.id, _id: d.id, ...d.data() }));
+      return cats
+        .filter((c: any) => c.active !== false)
+        .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+    } catch {
+      return [];
+    }
   },
 };
 

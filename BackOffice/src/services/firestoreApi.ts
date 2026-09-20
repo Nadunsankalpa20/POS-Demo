@@ -165,18 +165,30 @@ export const productsApi = {
     page?: number;
     limitCount?: number;
   }) {
-    const constraints: QueryConstraint[] = [orderBy('name')];
+    let snap;
+    try {
+      if (params?.status && params.status !== 'ALL') {
+        const q = query(collection(db, 'products'), where('status', '==', params.status));
+        snap = await getDocs(q);
+      } else {
+        snap = await getDocs(collection(db, 'products'));
+      }
+    } catch {
+      snap = await getDocs(collection(db, 'products'));
+    }
+
+    let products = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
     if (params?.status && params.status !== 'ALL') {
-      constraints.unshift(where('status', '==', params.status));
+      products = products.filter((p) => p.status === params.status);
     }
     if (params?.categoryId && params.categoryId !== 'ALL') {
-      constraints.unshift(where('categoryId', '==', params.categoryId));
+      products = products.filter(
+        (p) => p.categoryId === params.categoryId || p.categoryName === params.categoryId
+      );
     }
 
-    const q = query(collection(db, 'products'), ...constraints);
-    const snap = await getDocs(q);
-    let products = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+    products.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     if (params?.search) {
       const term = params.search.toLowerCase();
@@ -479,9 +491,9 @@ export const reportsApi = {
 
 export const categoriesApi = {
   async getAll() {
-    const q = query(collection(db, 'categories'), orderBy('name'));
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const snap = await getDocs(collection(db, 'categories'));
+    const cats = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return cats.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
   },
 
   async create(payload: any) {
@@ -499,9 +511,9 @@ export const categoriesApi = {
 
 export const suppliersApi = {
   async getAll() {
-    const q = query(collection(db, 'suppliers'), orderBy('name'));
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const snap = await getDocs(collection(db, 'suppliers'));
+    const sups = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return sups.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
   },
 
   async create(payload: any) {
