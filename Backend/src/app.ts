@@ -18,10 +18,11 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Health Check
-app.get('/api/health', (req: Request, res: Response) => {
+// Health Check & Uptime Monitoring
+app.get(['/', '/health', '/api/health'], (req: Request, res: Response) => {
   res.json({
     status: 'online',
+    uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     service: 'Supermarket POS & Back Office API',
   });
